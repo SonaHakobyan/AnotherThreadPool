@@ -32,9 +32,9 @@ namespace AnotherThreadPool
         private static List<Thread> workers;
 
         /// <summary>
-        /// The Background Worker Thraed
+        /// Background worker thread
         /// </summary>
-        private static readonly Thread backgroundWorker;
+        private static Thread backgroundWorker;
 
         /// <summary>
         /// Maximum number of worker threads in the thread pool
@@ -52,10 +52,10 @@ namespace AnotherThreadPool
             full = new Semaphore(0, int.MaxValue);
             mutex = new AutoResetEvent(true);
             workers = new List<Thread>();
-            maxThreads = 1000;
+            maxThreads = 100;
 
             // Initialize worker threads
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < maxThreads / 10; i++)
             {
                 // Create a new thread 
                 var worker = new Thread(ThreadFunc);
@@ -67,44 +67,9 @@ namespace AnotherThreadPool
                 worker.Start();
             }
 
-          //  Initializes backworker worker
-           backgroundWorker = new Thread(BackgroundFunction);
+            // IInitialize the background worker thread and start
+            backgroundWorker = new Thread(BackgroundFunction);
             backgroundWorker.Start();
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        private static void BackgroundFunction()
-        {
-            while (true)
-            {
-                Thread.Sleep(10000);
-
-                // Current workers count
-                var totalWorkers = workers.Count;
-
-                if (totalWorkers >= maxThreads) return;
-
-                // Current work items count
-                var totalWorkItems = workItems.Count;
-
-                // Creates some new threds if needed
-                if (totalWorkItems / totalWorkers >= 10)
-                {
-                    for (int i = 0; i < 3; i++)
-                    {
-                        // Create a new thread
-                        var thread = new Thread(ThreadFunc);
-
-                        // Add to workers list
-                        workers.Add(thread);
-
-                        // Start the thread
-                        thread.Start();
-                    }
-                }
-            }
         }
 
         /// <summary>
@@ -128,6 +93,42 @@ namespace AnotherThreadPool
 
                 // Invoke callback 
                 tuple.Item1?.Invoke(tuple.Item2);
+            }
+        }
+
+        /// <summary>
+        /// Checks and creates some new threds if needed
+        /// </summary>
+        private static void BackgroundFunction()
+        {
+            while (true)
+            {
+                // Current workers count
+                var totalWorkers = workers.Count;
+
+                if (totalWorkers >= maxThreads) return;
+
+                // Current work items count
+                var totalWorkItems = workItems.Count;
+
+                // Creates some new threds if needed
+                if (totalWorkItems / totalWorkers >= 10)
+                {
+                    for (int i = 0; i < 3; i++)
+                    {
+                        // Create a new thread
+                        var thread = new Thread(ThreadFunc);
+
+                        // Add to workers list
+                        workers.Add(thread);
+
+                        // Start the thread
+                        thread.Start();
+                    }
+                }
+
+                // Sleep 10 sec
+                Thread.Sleep(10000);
             }
         }
 

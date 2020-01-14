@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 
 namespace AnotherThreadPool
@@ -8,57 +7,56 @@ namespace AnotherThreadPool
     /// <summary>
     /// Custom Thread Pool implementation
     /// </summary>
-    public static class MyThreadPool
+    public class MyThreadPool
     {
         /// <summary>
-        /// Queue of user work items
-        /// Each item is a tuple of Callback function and State
+        /// Queue of user work items and states
         /// </summary>
-        private static Queue<Tuple<WaitCallback, object>> workItems;
+        private Queue<Tuple<Action<object>, object>> workItems;
 
         /// <summary>
-        /// AutoResetEvent for mutual exclusion
+        /// Mutex for mutual exclusion
         /// </summary>
-        private static AutoResetEvent mutex;
+        private Mutex mutex;
 
         /// <summary>
         /// Semaphore for counting the number of full spaces in the queue
         /// </summary>
-        private static Semaphore full;
+        private Semaphore full;
 
         /// <summary>
         /// Collection of worker threads
         /// </summary>
-        private static List<Thread> workers;
+        private List<Thread> workers;
 
         /// <summary>
         /// Background worker thread
         /// </summary>
-        private static Thread backgroundWorker;
+        private Thread backgroundWorker;
 
         /// <summary>
         /// Maximum number of worker threads in the thread pool
         /// </summary>
-        private static int maxThreads;
+        private int maxThreads;
 
         /// <summary>
-        /// Static ctor for MyThreadPool
+        /// Initializes a new instance of the MyThreadPool class
         /// </summary>
-        static MyThreadPool()
+        public MyThreadPool()
         {
             // Initialize static fields
 
-            workItems = new Queue<Tuple<WaitCallback, object>>();
-            full = new Semaphore(0, int.MaxValue);
-            mutex = new AutoResetEvent(true);
-            workers = new List<Thread>();
-            maxThreads = 100;
+            this.workItems = new Queue<Tuple<Action<object>, object>>();
+            this.full = new Semaphore(0, int.MaxValue);
+            this.mutex = new Mutex();
+            this.workers = new List<Thread>();
+            this.maxThreads = 100;
 
             // Initialize worker threads
             for (int i = 0; i < maxThreads / 10; i++)
             {
                 // Create a new thread 
-                var worker = new Thread(ThreadFunc);
+                var worker = new Thread(ExecuteWorkItem);
 
                 // Add to workers collection 
                 workers.Add(worker);
@@ -67,63 +65,42 @@ namespace AnotherThreadPool
                 worker.Start();
             }
 
-            // IInitialize the background worker thread and start
-            backgroundWorker = new Thread(BackgroundFunction);
+            // Initialize the background worker thread
+            backgroundWorker = new Thread(BalanceThreads);
+
+            // Start the background worker thread
             backgroundWorker.Start();
         }
 
         /// <summary>
-        /// Thread Function that wait until there is work, then get and do it
+        /// Creates some new threads if needed
         /// </summary>
-        private static void ThreadFunc()
-        {
-            while (true)
-            {
-                // Down full semaphore
-                full.WaitOne();
-
-                // Lock queue
-                mutex.Reset();
-
-                // Dequeue work item
-                var tuple = workItems.Dequeue();
-
-                // Unlock queue
-                mutex.Set();
-
-                // Invoke callback 
-                tuple.Item1?.Invoke(tuple.Item2);
-            }
-        }
-
-        /// <summary>
-        /// Checks and creates some new threds if needed
-        /// </summary>
-        private static void BackgroundFunction()
+        private void BalanceThreads()
         {
             while (true)
             {
                 // Current workers count
                 var totalWorkers = workers.Count;
 
+                // No more threads are allowed
                 if (totalWorkers >= maxThreads) return;
 
                 // Current work items count
                 var totalWorkItems = workItems.Count;
 
-                // Creates some new threds if needed
+                // Create some new threads if needed
                 if (totalWorkItems / totalWorkers >= 10)
                 {
-                    for (int i = 0; i < 3; i++)
+                    for (int i = 0; i < 2; i++)
                     {
                         // Create a new thread
-                        var thread = new Thread(ThreadFunc);
+                        var worker = new Thread(ExecuteWorkItem);
 
                         // Add to workers list
-                        workers.Add(thread);
+                        workers.Add(worker);
 
                         // Start the thread
-                        thread.Start();
+                        worker.Start();
                     }
                 }
 
@@ -133,24 +110,48 @@ namespace AnotherThreadPool
         }
 
         /// <summary>
+        /// Function that wait until there is some work, then get and do it
+        /// </summary>
+        private void ExecuteWorkItem()
+        {
+            while (true)
+            {
+                // Down full semaphore
+                full.WaitOne();
+
+                // Lock queue
+                mutex.WaitOne();
+
+                // Dequeue work item
+                var tuple = workItems.Dequeue();
+
+                // Unlock queue
+                mutex.ReleaseMutex();
+
+                // Execute the action
+                tuple.Item1?.Invoke(tuple.Item2);
+            }
+        }
+
+        /// <summary>
         ///  Queues a method for execution, and specifies an object containing data to be
         ///  used by the method. The method executes when a thread pool thread becomes available
         /// </summary>
-        /// <param name="callBack">The method to execute</param>
+        /// <param name="action">The method to execute</param>
         /// <param name="state">An object containing data to be used by the method.</param>
-        public static void QueueUserWorkItem(WaitCallback callBack, object state = null)
+        public void QueueUserWorkItem(Action<object> action, object state = null)
         {
-            // Do nothing in case of null callback
-            if (callBack == null) return;
+            // Return in case of null action
+            if (action == null) return;
 
             // Lock queue
-            mutex.Reset();
+            mutex.WaitOne();
 
-            // Enqueue callback and its state
-            workItems.Enqueue(new Tuple<WaitCallback, object>(callBack, state));
+            // Enqueue action and its state
+            workItems.Enqueue(new Tuple<Action<object>, object>(action, state));
 
             // Unlock queue
-            mutex.Set();
+            mutex.ReleaseMutex();
 
             // Up full semaphore
             full.Release();
